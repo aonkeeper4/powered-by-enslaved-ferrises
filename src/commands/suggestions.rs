@@ -1,9 +1,10 @@
 use chrono::{DateTime, Utc};
 use rand::prelude::*;
 use serenity::framework::standard::macros::command;
-use serenity::framework::standard::{Args, CommandResult};
+use serenity::framework::standard::{Args, CommandResult, CommandError};
 use serenity::model::prelude::component::ButtonStyle;
 use serenity::model::prelude::*;
+use serenity::model::application::interaction::InteractionResponseType;
 use serenity::prelude::*;
 use serenity::utils::Color;
 use std::time::Duration;
@@ -21,8 +22,8 @@ struct Suggestion {
 impl Suggestion {
     fn new() -> Self {
         Self {
-            title: String::new(),
-            desc: String::new(),
+            title: "New Suggestion".into(),
+            desc: "Description".into(),
             tags: vec![],
             id: thread_rng().next_u32(),
             time_created: chrono::offset::Utc::now(),
@@ -37,6 +38,7 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
     let mut suggestion = Suggestion::new();
 
     loop {
+        // TODO: possibly restructure?
         let menu = channel_id.send_message(&ctx.http, |m| {
             m.embed(|e| {
                 e.title(format!("Create Suggestion: {}", suggestion.title))
@@ -77,17 +79,54 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
         }).await?;
 
         let Some(interaction) = menu.await_component_interaction(ctx).timeout(Duration::from_secs(60 * 3)).await else {
-            menu.reply(&ctx, "Timed out").await.expect("Unable to reply to message");
+            menu.reply(&ctx, "Timed out").await?;
             return Ok(());
         };
 
         let action = &interaction.data.custom_id;
         match action.as_str() {
-            "edit_title" => todo!("edit title"),
+            "edit_title" => {
+                interaction.create_interaction_response(&ctx, |r| {
+                    r.kind(InteractionResponseType::UpdateMessage).interaction_response_data(|d| {
+                        d.embed(|e| e.title("Edit Title")
+                            .description("Please reply to this message with the new title of your suggestion (timeout 30 seconds)")
+                            .footer(|f| {
+                                f.text(format!(
+                                    "Editing Suggestion ID {}",
+                                    suggestion.id
+                                ))
+                            })
+                            .color(Color::DARK_TEAL)
+                        )
+                    })
+                }).await?;
+
+                if let Some(new_title) = &msg.author.await_reply(ctx).timeout(Duration::from_secs(30)).await {
+                    suggestion.title = new_title.content.trim().to_string();
+                    new_title.delete(&ctx.http).await?;
+
+                    // TODO: fix so this edts the message and also has continue button
+                    interaction.create_followup_message(&ctx, |d| {
+                        d.embed(|e| e.title("Success")
+                            .description("Suggestion title successfully edited!")
+                            .footer(|f| {
+                                f.text(format!(
+                                    "Editing Suggestion ID {}",
+                                    suggestion.id
+                                ))
+                            })
+                            .color(Color::DARK_TEAL)
+                        )
+                    }).await?;
+                } else {
+                    menu.reply(&ctx, "Timed out").await?;
+                    return Ok(());
+                }
+            },
             "edit_desc" => todo!("edit desc"),
             "send" => todo!("send"),
             "cancel" => todo!("cancel"),
-            _ => unreachable!(),
+            _ => panic!("invalid action"),
         }
     }
     Ok(())
