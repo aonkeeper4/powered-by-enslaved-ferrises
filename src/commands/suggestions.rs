@@ -1,13 +1,15 @@
 use chrono::{DateTime, Utc};
 use rand::prelude::*;
-use serenity::builder::CreateMessage;
+use serenity::builder::{CreateEmbed, CreateComponents};
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
 use serenity::model::application::interaction::InteractionResponseType;
 use serenity::model::prelude::component::{ButtonStyle, InputTextStyle};
 use serenity::model::prelude::*;
+use serenity::model::prelude::interaction::message_component::MessageComponentInteraction;
 use serenity::prelude::*;
 use serenity::utils::Color;
+use std::sync::Arc;
 use std::time::Duration;
 
 struct SuggestionTag(pub String);
@@ -30,6 +32,48 @@ impl Suggestion {
             time_created: chrono::offset::Utc::now(),
         }
     }
+
+    fn tags_string(&self) -> String {
+        if self.tags.is_empty() {
+            "No tags".to_string()
+        } else {
+            self.tags
+                .iter()
+                .map(|t| t.0.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    }
+}
+
+fn create_menu_embed(suggestion: &Suggestion) -> CreateEmbed {
+    let mut e = CreateEmbed::default();
+    e.title(format!("Create Suggestion: {}", &suggestion.title))
+        .description(&suggestion.desc)
+        .footer(|f| {
+            f.text(format!(
+                "Tags: {} | Time created: {} | ID: {}",
+                suggestion.tags_string(),
+                suggestion.time_created.format("%d/%m/%Y @%H:%M:%S UTC"),
+                suggestion.id,
+            ))
+        })
+        .color(Color::DARK_TEAL);
+    e
+}
+
+async fn get_interaction(ctx: &Context, msg: &mut Message, timeout: Duration, color: Color) -> CommandResult<Option<Arc<MessageComponentInteraction>>> {
+    if let Some(interaction) = msg.await_component_interaction(ctx).timeout(timeout).await {
+        Ok(Some(interaction))
+    } else {
+        // menu.reply(&ctx, "Timed out").await?;
+        msg.edit(&ctx, |m| {
+            m.embed(|e| {
+                e.title("Timed out").description("Interaction timed out").color(color)
+            })
+        }).await?;
+        Ok(None)
+    }
 }
 
 #[command]
@@ -38,59 +82,49 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
 
     let mut suggestion = Suggestion::new();
 
-    let menu = channel_id
-        .send_message(&ctx.http, |m| {
-            m.embed(|e| {
-                e.title(format!("Create Suggestion: {}", &suggestion.title))
-                    .description(&suggestion.desc)
-                    .footer(|f| {
-                        f.text(format!(
-                            "Time created: {} | ID: {}",
-                            suggestion.time_created.format("%d/%m/%Y @%H:%M:%S UTC"),
-                            suggestion.id
-                        ))
-                    })
-                    .color(Color::DARK_TEAL)
-            })
-            .components(|c| {
-                c.create_action_row(|a| {
-                    a.create_button(|b| {
-                        b.label("Edit Title")
-                            .style(ButtonStyle::Primary)
-                            .custom_id("edit_title")
-                    })
-                    .create_button(|b| {
-                        b.label("Edit Description")
-                            .style(ButtonStyle::Primary)
-                            .custom_id("edit_desc")
-                    })
-                    .create_button(|b| {
-                        b.label("Confirm")
-                            .style(ButtonStyle::Success)
-                            .custom_id("send")
-                    })
-                    .create_button(|b| {
-                        b.label("Cancel")
-                            .style(ButtonStyle::Danger)
-                            .custom_id("cancel")
-                    })
-                })
-            })
+    let mut menu_components = CreateComponents::default();
+    menu_components.create_action_row(|a| {
+        a.create_button(|b| {
+            b.label("Edit Title")
+                .style(ButtonStyle::Primary)
+                .custom_id("edit_title")
         })
+        .create_button(|b| {
+            b.label("Edit Description")
+                .style(ButtonStyle::Primary)
+                .custom_id("edit_desc")
+        })
+        .create_button(|b| {
+            b.label("Edit Tags")
+                .style(ButtonStyle::Primary)
+                .custom_id("edit_tags")
+        })
+        .create_button(|b| {
+            b.label("Confirm")
+                .style(ButtonStyle::Success)
+                .custom_id("send")
+        })
+        .create_button(|b| {
+            b.label("Cancel")
+                .style(ButtonStyle::Danger)
+                .custom_id("cancel")
+        })
+    });
+
+    let mut menu = channel_id
+        .send_message(&ctx.http, |m| m.set_embed(create_menu_embed(&suggestion)).set_components(menu_components.clone()))
         .await?;
 
     loop {
         // TODO: possibly restructure?
 
-        let Some(interaction) = menu.await_component_interaction(ctx).timeout(Duration::from_secs(60 * 3)).await else {
-            menu.reply(&ctx, "Timed out").await?;
+        let Some(interaction) = get_interaction(ctx, &mut menu, Duration::from_secs(60), Color::DARK_TEAL).await? else {
             return Ok(());
         };
         let action = &interaction.data.custom_id;
 
         match action.as_str() {
             "edit_title" => {
-                println!("editing title");
                 interaction
                     .create_interaction_response(&ctx, |r| {
                         r.kind(InteractionResponseType::UpdateMessage)
@@ -113,7 +147,9 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                                         a.create_input_text(|i| {
                                             i.label("New title:")
                                                 .custom_id("new_title")
+                                                .required(true)
                                                 .style(InputTextStyle::Short)
+                                                .placeholder("Title goes here...")
                                         })
                                     })
                                 })
@@ -121,8 +157,7 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                     })
                     .await?;
 
-                let Some(interaction) = menu.await_component_interaction(ctx).timeout(Duration::from_secs(60 * 3)).await else {
-                    menu.reply(&ctx, "Timed out").await?;
+                let Some(interaction) = get_interaction(ctx, &mut menu, Duration::from_secs(60), Color::DARK_TEAL).await? else {
                     return Ok(());
                 };
                 let new_title = &interaction.data.values[0];
@@ -157,55 +192,20 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                     .await?;
             }
             "edit_desc" => todo!("edit desc"),
+            "edit_tags" => todo!("edit tags"),
             "send" => todo!("send"),
             "cancel" => todo!("cancel"),
             _ => panic!("invalid action"),
         }
 
-        let Some(interaction) = menu.await_component_interaction(ctx).timeout(Duration::from_secs(60 * 3)).await else {
-            menu.reply(&ctx, "Timed out").await?;
+        let Some(interaction) = get_interaction(ctx, &mut menu, Duration::from_secs(60), Color::DARK_TEAL).await? else {
             return Ok(());
         };
         interaction
             .create_interaction_response(&ctx, |r| {
                 r.kind(InteractionResponseType::UpdateMessage)
                     .interaction_response_data(|d| {
-                        d.embed(|e| {
-                            e.title(format!("Create Suggestion: {}", &suggestion.title))
-                                .description(&suggestion.desc)
-                                .footer(|f| {
-                                    f.text(format!(
-                                        "Time created: {} | ID: {}",
-                                        suggestion.time_created.format("%d/%m/%Y @%H:%M:%S UTC"),
-                                        suggestion.id
-                                    ))
-                                })
-                                .color(Color::DARK_TEAL)
-                        })
-                        .components(|c| {
-                            c.create_action_row(|a| {
-                                a.create_button(|b| {
-                                    b.label("Edit Title")
-                                        .style(ButtonStyle::Primary)
-                                        .custom_id("edit_title")
-                                })
-                                .create_button(|b| {
-                                    b.label("Edit Description")
-                                        .style(ButtonStyle::Primary)
-                                        .custom_id("edit_desc")
-                                })
-                                .create_button(|b| {
-                                    b.label("Confirm")
-                                        .style(ButtonStyle::Success)
-                                        .custom_id("send")
-                                })
-                                .create_button(|b| {
-                                    b.label("Cancel")
-                                        .style(ButtonStyle::Danger)
-                                        .custom_id("cancel")
-                                })
-                            })
-                        })
+                        d.set_embed(create_menu_embed(&suggestion)).set_components(menu_components.clone())
                     })
             })
             .await?;
