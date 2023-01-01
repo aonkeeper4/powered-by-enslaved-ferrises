@@ -62,6 +62,8 @@ fn create_menu_embed(suggestion: &Suggestion) -> CreateEmbed {
     e
 }
 
+pub const INTERACTION_TIMEOUT: Duration = Duration::from_secs(60 * 3);
+
 async fn get_interaction(ctx: &Context, msg: &mut Message, timeout: Duration, color: Color) -> CommandResult<Option<Arc<MessageComponentInteraction>>> {
     if let Some(interaction) = msg.await_component_interaction(ctx).timeout(timeout).await {
         Ok(Some(interaction))
@@ -119,7 +121,7 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
     loop {
         // TODO: possibly restructure?
 
-        let Some(interaction) = get_interaction(ctx, &mut menu, Duration::from_secs(60), Color::DARK_TEAL).await? else {
+        let Some(interaction) = get_interaction(ctx, &mut menu, INTERACTION_TIMEOUT, Color::DARK_TEAL).await? else {
             return Ok(());
         };
         let action = &interaction.data.custom_id;
@@ -148,7 +150,7 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                     })
                     .await?;
 
-                let Some(answer) = &msg.author.await_reply(ctx).timeout(Duration::from_secs(30)).await else {
+                let Some(answer) = &msg.author.await_reply(ctx).timeout(INTERACTION_TIMEOUT).await else {
                     menu.edit(&ctx, |m| {
                         m.embed(|e| {
                             e.title("Timed out").description("Interaction timed out").color(Color::DARK_TEAL)
@@ -206,7 +208,7 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                     })
                     .await?;
 
-                let Some(answer) = &msg.author.await_reply(ctx).timeout(Duration::from_secs(30)).await else {
+                let Some(answer) = &msg.author.await_reply(ctx).timeout(INTERACTION_TIMEOUT).await else {
                     menu.edit(&ctx, |m| {
                         m.embed(|e| {
                             e.title("Timed out").description("Interaction timed out").color(Color::DARK_TEAL)
@@ -248,7 +250,7 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
             _ => panic!("invalid action"),
         }
 
-        let Some(interaction) = get_interaction(ctx, &mut menu, Duration::from_secs(60), Color::DARK_TEAL).await? else {
+        let Some(interaction) = get_interaction(ctx, &mut menu, INTERACTION_TIMEOUT, Color::DARK_TEAL).await? else {
             return Ok(());
         };
         interaction
