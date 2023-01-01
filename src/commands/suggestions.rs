@@ -4,7 +4,7 @@ use serenity::builder::{CreateEmbed, CreateComponents};
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::{Args, CommandResult};
 use serenity::model::application::interaction::InteractionResponseType;
-use serenity::model::prelude::component::{ButtonStyle, InputTextStyle};
+use serenity::model::prelude::component::ButtonStyle;
 use serenity::model::prelude::*;
 use serenity::model::prelude::interaction::message_component::MessageComponentInteraction;
 use serenity::prelude::*;
@@ -71,6 +71,7 @@ async fn get_interaction(ctx: &Context, msg: &mut Message, timeout: Duration, co
             m.embed(|e| {
                 e.title("Timed out").description("Interaction timed out").color(color)
             })
+            .set_components(CreateComponents::default())
         }).await?;
         Ok(None)
     }
@@ -132,7 +133,7 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                                 d.embed(|e| {
                                     e.title("Edit Title")
                                         .description(
-                                            "Please input the new title of your suggestion",
+                                            "Please type the new title of your suggestion",
                                         )
                                         .footer(|f| {
                                             f.text(format!(
@@ -142,34 +143,56 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                                         })
                                         .color(Color::DARK_TEAL)
                                 })
-                                .components(|c| {
-                                    c.create_action_row(|a| {
-                                        a.create_input_text(|i| {
-                                            i.label("New title:")
-                                                .custom_id("new_title")
-                                                .required(true)
-                                                .style(InputTextStyle::Short)
-                                                .placeholder("Title goes here...")
-                                        })
-                                    })
-                                })
+                                .set_components(CreateComponents::default())
                             })
                     })
                     .await?;
 
-                let Some(interaction) = get_interaction(ctx, &mut menu, Duration::from_secs(60), Color::DARK_TEAL).await? else {
+                let Some(answer) = &msg.author.await_reply(ctx).timeout(Duration::from_secs(30)).await else {
+                    menu.edit(&ctx, |m| {
+                        m.embed(|e| {
+                            e.title("Timed out").description("Interaction timed out").color(Color::DARK_TEAL)
+                        })
+                    }).await?;
                     return Ok(());
                 };
-                let new_title = &interaction.data.values[0];
-                suggestion.title = new_title.trim().to_string();
+                let new_title = answer.content.trim().to_string();
+                suggestion.title = new_title;
+                answer.delete(ctx).await?;
 
+                menu.edit(&ctx, |m| {
+                    m.embed(|e| {
+                        e.title("Success")
+                            .description("Suggestion title was updated successfully!")
+                            .footer(|f| {
+                                f.text(format!(
+                                    "Editing Suggestion ID {}",
+                                    suggestion.id
+                                ))
+                            })
+                            .color(Color::DARK_TEAL)
+                    })
+                    .components(|c| {
+                        c.create_action_row(|a| {
+                            a.create_button(|b| {
+                                b.label("Continue")
+                                    .style(ButtonStyle::Success)
+                                    .custom_id("continue")
+                            })
+                        })
+                    })
+                }).await?;
+            }
+            "edit_desc" => {
                 interaction
                     .create_interaction_response(&ctx, |r| {
                         r.kind(InteractionResponseType::UpdateMessage)
                             .interaction_response_data(|d| {
                                 d.embed(|e| {
-                                    e.title("Success")
-                                        .description("Suggestion title was updated successfully!")
+                                    e.title("Edit Description")
+                                        .description(
+                                            "Please type the new description of your suggestion",
+                                        )
                                         .footer(|f| {
                                             f.text(format!(
                                                 "Editing Suggestion ID {}",
@@ -178,20 +201,47 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
                                         })
                                         .color(Color::DARK_TEAL)
                                 })
-                                .components(|c| {
-                                    c.create_action_row(|a| {
-                                        a.create_button(|b| {
-                                            b.label("Continue")
-                                                .style(ButtonStyle::Success)
-                                                .custom_id("continue")
-                                        })
-                                    })
-                                })
+                                .set_components(CreateComponents::default())
                             })
                     })
                     .await?;
-            }
-            "edit_desc" => todo!("edit desc"),
+
+                let Some(answer) = &msg.author.await_reply(ctx).timeout(Duration::from_secs(30)).await else {
+                    menu.edit(&ctx, |m| {
+                        m.embed(|e| {
+                            e.title("Timed out").description("Interaction timed out").color(Color::DARK_TEAL)
+                        })
+                        .set_components(CreateComponents::default())
+                    }).await?;
+                    return Ok(());
+                };
+                let new_desc = answer.content.trim().to_string();
+                suggestion.desc = new_desc;
+                answer.delete(ctx).await?;
+
+                menu.edit(&ctx, |m| {
+                    m.embed(|e| {
+                        e.title("Success")
+                            .description("Suggestion description was updated successfully!")
+                            .footer(|f| {
+                                f.text(format!(
+                                    "Editing Suggestion ID {}",
+                                    suggestion.id
+                                ))
+                            })
+                            .color(Color::DARK_TEAL)
+                    })
+                    .components(|c| {
+                        c.create_action_row(|a| {
+                            a.create_button(|b| {
+                                b.label("Continue")
+                                    .style(ButtonStyle::Success)
+                                    .custom_id("continue")
+                            })
+                        })
+                    })
+                }).await?;
+            },
             "edit_tags" => todo!("edit tags"),
             "send" => todo!("send"),
             "cancel" => todo!("cancel"),
