@@ -262,5 +262,4 @@ pub async fn create(ctx: &Context, msg: &Message, _args: Args) -> CommandResult 
             })
             .await?;
     }
-    Ok(())
 }
